@@ -10,40 +10,68 @@ const getGroqClient = () => {
   return groqClient;
 };
 
-const generateFallbackQuestion = (topic, difficulty) => {
-  const templates = [
-    `Explain the core concept of ${topic} and why it is important in modern engineering.`,
-    `Describe a common challenge in ${topic} and how you would solve it.`,
-    `What are the most important principles when designing ${topic} solutions?`,
-    `How would you approach a complex ${topic} problem in a production environment?`
+const mapDifficulty = (difficulty) => {
+  if (typeof difficulty === 'string') {
+    const normalized = difficulty.toLowerCase();
+    if (normalized === 'easy') return 3;
+    if (normalized === 'medium') return 5;
+    if (normalized === 'hard') return 8;
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? Math.min(10, Math.max(1, parsed)) : 1;
+  }
+
+  if (typeof difficulty === 'number' && Number.isFinite(difficulty)) {
+    return Math.min(10, Math.max(1, difficulty));
+  }
+
+  return 1;
+};
+
+const generateFallbackQuestion = (topic, difficulty, index) => {
+  const prompts = [
+    `Explain the core concept of ${topic} and why it matters for software development.`,
+    `Describe a common problem in ${topic} and how you would solve it in a production environment.`,
+    `What are the most important design principles for ${topic} solutions?`,
+    `How would you improve performance or reliability when working with ${topic}?`,
+    `Describe a practical example where ${topic} helped solve a real engineering challenge.`
   ];
 
-  const index = Math.min(templates.length - 1, Math.max(0, difficulty - 1));
-  return templates[index] || `Explain your approach to ${topic} with respect to system design and reliability.`;
+  return prompts[index % prompts.length];
 };
 
 const evaluateFallbackAnswer = (question, answer, difficulty) => {
   const normalized = (answer || '').trim();
   const lengthScore = Math.min(5, Math.floor(normalized.length / 80));
-  const higherScoreOnKeywords = ['performance', 'scalability', 'security', 'reliability'];
-  const keywordScore = higherScoreOnKeywords.some((keyword) => normalized.toLowerCase().includes(keyword)) ? 2 : 0;
+  const keywordScore = ['performance', 'scalability', 'security', 'reliability'].some((keyword) =>
+    normalized.toLowerCase().includes(keyword)
+  )
+    ? 2
+    : 0;
   const score = Math.min(10, Math.max(1, lengthScore + keywordScore + Math.floor(difficulty / 4)));
 
-  const feedback = score >= 8
-    ? 'Your response shows strong understanding and clear reasoning. Keep using examples and system-level details to remain consistent.'
-    : score >= 5
+  const feedback =
+    score >= 8
+      ? 'Your response shows strong understanding and clear reasoning. Keep using examples and system-level details to remain consistent.'
+      : score >= 5
       ? 'You have a good foundation here, but the answer would benefit from more structure and a stronger focus on trade-offs.'
       : 'The answer is a good start, but please include clearer technical steps, examples, and the impact of your design choices.';
 
   const correctAnswer = `A strong answer should define the problem, explain the core concepts, highlight relevant trade-offs, and describe how to apply the solution in practice.`;
-  const nextQuestion = `Describe how you would improve ${topic} performance when the system is under heavy load.`;
 
   return {
     score,
     feedback,
-    correctAnswer,
-    nextQuestion
+    correctAnswer
   };
+};
+
+const buildFallbackQuestions = (topic, difficulty) => {
+  return Array.from({ length: 5 }, (_, index) => ({
+    _id: `question-${index}`,
+    text: generateFallbackQuestion(topic, difficulty, index),
+    category: topic,
+    difficulty
+  }));
 };
 
 const parseJsonResponse = (content, fallbackValue = {}) => {
@@ -54,19 +82,41 @@ const parseJsonResponse = (content, fallbackValue = {}) => {
   }
 };
 
+const buildQuestionsFromAi = async (topic, difficulty) => {
+  const systemPrompt = `You are an expert technical interviewer. Generate five interview questions for the requested topic and difficulty level. Your response must be valid JSON with a single field named questions, which is an array of strings.`;
+  const userPrompt = `Topic: ${topic}\nDifficulty: ${difficulty}`;
+  const completion = await getGroqClient().chat.completions.create({
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt }
+    ],
+    model: 'llama-3.1-8b-instant',
+    response_format: { type: 'json_object' },
+    temperature: 0.6
+  });
+
+  const aiResponse = parseJsonResponse(completion.choices?.[0]?.message?.content, {});
+  if (!Array.isArray(aiResponse.questions)) {
+    return null;
+  }
+
+  return aiResponse.questions.slice(0, 5).map((questionText, index) => ({
+    _id: `question-${index}`,
+    text: typeof questionText === 'string' ? questionText : String(questionText),
+    category: topic,
+    difficulty
+  }));
+};
+
 export const startSession = async (req, res, next) => {
   try {
     const { topic, difficulty } = req.body;
     const normalizedTopic = typeof topic === 'string' ? topic.trim() : '';
-    let parsedDifficulty = Number(difficulty);
+    const parsedDifficulty = mapDifficulty(difficulty);
 
     if (!normalizedTopic) {
       res.status(400);
       throw new Error('Interview topic is required');
-    }
-
-    if (!parsedDifficulty || parsedDifficulty < 1 || parsedDifficulty > 10) {
-      parsedDifficulty = 1;
     }
 
     const session = await Session.create({
@@ -79,35 +129,19 @@ export const startSession = async (req, res, next) => {
       scoreHistory: []
     });
 
-    let questionText = generateFallbackQuestion(session.topic, session.currentDifficulty);
+    let questions = buildFallbackQuestions(session.topic, session.currentDifficulty);
     if (process.env.GROQ_API_KEY) {
-      const systemPrompt = `You are an expert technical interviewer. Generate a technical interview question for the requested topic and difficulty level. Your response must be valid JSON with a single field named question.`;
-      const userPrompt = `Topic: ${session.topic}\nDifficulty: ${session.currentDifficulty}`;
-      const completion = await getGroqClient().chat.completions.create({
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
-        model: 'llama-3.1-8b-instant',
-        response_format: { type: 'json_object' },
-        temperature: 0.6
-      });
-
-      const aiResponse = parseJsonResponse(completion.choices?.[0]?.message?.content, {});
-      questionText = aiResponse.question || questionText;
+      const aiQuestions = await buildQuestionsFromAi(session.topic, session.currentDifficulty);
+      if (Array.isArray(aiQuestions) && aiQuestions.length > 0) {
+        questions = aiQuestions;
+      }
     }
 
     return res.status(201).json({
       sessionId: session._id,
       topic: session.topic,
       difficulty: session.currentDifficulty,
-      questions: [
-        {
-          _id: session._id,
-          text: questionText,
-          category: session.topic
-        }
-      ]
+      questions
     });
   } catch (error) {
     next(error);
@@ -117,6 +151,7 @@ export const startSession = async (req, res, next) => {
 export const submitAnswer = async (req, res, next) => {
   try {
     const { sessionId, answers } = req.body;
+
     if (!sessionId || !Array.isArray(answers) || answers.length === 0) {
       res.status(400);
       throw new Error('sessionId and answers are required');
@@ -138,19 +173,19 @@ export const submitAnswer = async (req, res, next) => {
       throw new Error('This interview session is already completed');
     }
 
-    let totalScore = 0;
     const createdAttempts = [];
+    let submissionTotalScore = 0;
 
     for (const answerItem of answers) {
-      const { question, userAnswer } = answerItem;
-      if (!question || typeof userAnswer !== 'string') {
-        continue;
-      }
+      const questionText = typeof answerItem.question === 'string'
+        ? answerItem.question
+        : `Interview question`;
+      const userAnswer = typeof answerItem.userAnswer === 'string' ? answerItem.userAnswer : '';
 
       let evaluation;
       if (process.env.GROQ_API_KEY) {
         const systemPrompt = `You are a strict but constructive technical interviewer. Evaluate the user's answer to the given question and provide a score from 0 to 10, short feedback, the ideal correct answer, and a new follow-up question. Your response must be valid JSON.`;
-        const userPrompt = `Topic: ${session.topic}\nDifficulty: ${session.currentDifficulty}\nQuestion: ${question}\nUser Answer: ${userAnswer}`;
+        const userPrompt = `Topic: ${session.topic}\nDifficulty: ${session.currentDifficulty}\nQuestion: ${questionText}\nUser Answer: ${userAnswer}`;
         const completion = await getGroqClient().chat.completions.create({
           messages: [
             { role: 'system', content: systemPrompt },
@@ -162,18 +197,17 @@ export const submitAnswer = async (req, res, next) => {
         });
         evaluation = parseJsonResponse(completion.choices?.[0]?.message?.content, {});
       } else {
-        evaluation = evaluateFallbackAnswer(question, userAnswer, session.currentDifficulty);
+        evaluation = evaluateFallbackAnswer(questionText, userAnswer, session.currentDifficulty);
       }
 
       const score = Number(evaluation.score ?? 0);
       const feedback = evaluation.feedback || 'No feedback was generated.';
       const correctAnswer = evaluation.correct_answer || evaluation.correctAnswer || 'No answer available.';
-      const nextQuestion = evaluation.next_question || evaluation.nextQuestion || generateFallbackQuestion(session.topic, session.currentDifficulty);
 
       const attempt = await Attempt.create({
         sessionId: session._id,
         userId: req.user._id,
-        question,
+        question: questionText,
         userAnswer,
         score,
         feedback,
@@ -182,7 +216,7 @@ export const submitAnswer = async (req, res, next) => {
       });
 
       createdAttempts.push(attempt);
-      totalScore += score;
+      submissionTotalScore += score;
       session.attemptsCount += 1;
       session.totalScore += score;
       session.scoreHistory.push(score);
@@ -201,17 +235,16 @@ export const submitAnswer = async (req, res, next) => {
 
     await session.save();
 
-    const averageScore = session.attemptsCount ? Number((session.totalScore / session.attemptsCount).toFixed(1)) : 0;
-
     return res.status(200).json({
-      score: averageScore,
-      feedback: createdAttempts.map((attempt) => attempt.feedback).join(' '),
-      correctAnswer: createdAttempts.map((attempt) => attempt.correctAnswer).join(' '),
-      nextQuestion: createdAttempts.length > 0 ? createdAttempts[createdAttempts.length - 1].question : null,
-      difficulty: session.currentDifficulty,
+      results: createdAttempts.map((attempt) => ({
+        score: attempt.score,
+        feedback: attempt.feedback,
+        correctAnswer: attempt.correctAnswer
+      })),
+      totalScore: submissionTotalScore,
+      sessionAverageScore: session.attemptsCount ? Number((session.totalScore / session.attemptsCount).toFixed(1)) : 0,
       completed: session.status === 'completed',
-      attemptsCount: session.attemptsCount,
-      sessionId: session._id
+      attemptsCount: session.attemptsCount
     });
   } catch (error) {
     next(error);
@@ -230,6 +263,7 @@ export const getSessionHistory = async (req, res, next) => {
       status: session.status,
       attemptsCount: session.attemptsCount,
       score: session.attemptsCount ? Number((session.totalScore / session.attemptsCount).toFixed(1)) : 0,
+      totalScore: session.totalScore,
       currentDifficulty: session.currentDifficulty,
       createdAt: session.createdAt,
       completedAt: session.completedAt

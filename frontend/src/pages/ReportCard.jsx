@@ -14,7 +14,7 @@ export default function ReportCard() {
     const loadHistory = async () => {
       try {
         setLoading(true);
-        const response = await api.get("/interview/history");
+        const response = await api.get("/api/interview/history");
         setHistory(response.sessions || []);
       } catch (err) {
         setError(err.message || "Unable to load session history.");
@@ -60,7 +60,7 @@ export default function ReportCard() {
           <div className="p-8 border shadow-2xl rounded-3xl border-zinc-800 bg-zinc-950/60">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
               <div>
-                <p className="text-sm uppercase tracking-[0.3em] text-accent-emerald">Summary</p>
+                <p className="text-sm uppercase tracking-[0.3em] text-accent-violet">Summary</p>
                 <h2 className="mt-3 text-4xl font-bold">Keep improving.</h2>
                 <p className="mt-2 text-sm text-zinc-400">Track your latest interview sessions, scores, and progress metrics.</p>
               </div>
@@ -92,7 +92,7 @@ export default function ReportCard() {
                       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                         <div>
                           <p className="text-sm uppercase tracking-[0.24em] text-zinc-500">{session.topic}</p>
-                          <h3 className="mt-2 text-xl font-semibold text-white">{session.difficulty} session</h3>
+                          <h3 className="mt-2 text-xl font-semibold text-white">{session.currentDifficulty} difficulty</h3>
                         </div>
                         <div className="px-4 py-3 text-sm text-white rounded-2xl bg-zinc-950/80">
                           Score: {session.score}%

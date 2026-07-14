@@ -77,7 +77,7 @@ export default function Login() {
           <button
             type="submit"
             disabled={authLoading}
-            className="w-full rounded-2xl bg-gradient-to-r from-accent-violet to-accent-emerald px-5 py-3 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
+            className="w-full rounded-2xl bg-accent-violet px-5 py-3 text-sm font-semibold text-white transition hover:bg-violet-600 disabled:cursor-not-allowed disabled:opacity-70"
           >
             {authLoading ? 'Signing in...' : 'Sign in'}
           </button>
