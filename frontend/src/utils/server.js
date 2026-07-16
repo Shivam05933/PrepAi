@@ -9,16 +9,19 @@ dotenv.config();
 const app = express();
 
 const allowedOrigins = [
-  'http://localhost:5173', 
-  'https://prep-ai-navy-theta.vercel.app'
+  'http://localhost:5173',
+  'https://prep-ai-navy-theta.vercel.app',
+  'https://prep-ai-git-main-shivam05933s-projects.vercel.app'
 ];
 
 app.use(cors({
   origin: function(origin, callback) {
+    console.log("Incoming Origin:", origin); 
+
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      callback(new Error('CORS not allowed'));
+      callback(new Error('CORS not allowed: ' + origin));
     }
   },
   credentials: true
