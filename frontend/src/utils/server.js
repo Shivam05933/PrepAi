@@ -10,7 +10,7 @@ const app = express();
 
 const allowedOrigins = [
   'http://localhost:5173', 
-  'https://prepai.vercel.app' 
+  'https://prep-ai-navy-theta.vercel.app'
 ];
 
 app.use(cors({
