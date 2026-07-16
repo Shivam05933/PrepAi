@@ -14,7 +14,7 @@ export default function ReportCard() {
     const loadHistory = async () => {
       try {
         setLoading(true);
-        const response = await api.get("/api/interview/history");
+        const response = await api.get("/interview/history");
         setHistory(response.sessions || []);
       } catch (err) {
         setError(err.message || "Unable to load session history.");
