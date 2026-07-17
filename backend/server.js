@@ -14,14 +14,25 @@ const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/prep-ai';
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
 
 app.use(helmet());
-app.use(
-  cors({
-    origin: CLIENT_URL,
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
-    allowedHeaders: ['Content-Type', 'Accept'],
-    credentials: true
-  })
-);
+const allowedOrigins = [
+  'http://localhost:5173',
+  'https://prep-ai-navy-theta.vercel.app',
+  'https://prep-ai-git-main-shivam05933s-projects.vercel.app'
+];
+
+app.use(cors({
+  origin: function(origin, callback) {
+    console.log("🔥 Origin:", origin);
+
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('CORS not allowed: ' + origin));
+    }
+  },
+  credentials: true
+}));
+app.set('trust proxy', 1);
 app.use(express.json());
 app.use(cookieParser());
 
